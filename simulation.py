@@ -7,6 +7,7 @@ class FlightSimulator:
     def __init__(self):
         self._rng = np.random.default_rng()
         self.launch_time = datetime.now(timezone.utc)
+        self.flight_history: list[TelemetryFrame] = []
 
     def generate_frame(self) -> TelemetryFrame:
         now = datetime.now(timezone.utc)
@@ -52,7 +53,7 @@ class FlightSimulator:
         accel_noise = self._rng.normal(0, 0.0013 * 9.81, size=3)  # [x, y, z] noise
         gyro_noise = self._rng.normal(0, 0.00087, size=3)  # [x, y, z] noise
 
-        return TelemetryFrame(
+        frame = TelemetryFrame(
             timestamp=now.isoformat(),
             mission_elapsed_time_s=round(elapsed, 3),
             altitude_m=round(float(true_altitude + baro_noise), 2),
@@ -65,3 +66,5 @@ class FlightSimulator:
             gyro_z_rads=round(float(gyro_noise[2]), 4),
             phase=phase,
         )
+        self.flight_history.append(frame)
+        return frame

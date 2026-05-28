@@ -13,3 +13,15 @@ class TelemetryFrame(BaseModel):
     gyro_y_rads: float
     gyro_z_rads: float
     phase: str
+
+
+class HealthResponse(BaseModel):
+    message: str
+    version: str
+    status: str
+
+
+class FlightSummary(BaseModel):
+    total_frames: int
+    latest_phase: str
+    max_altitude_m: float
