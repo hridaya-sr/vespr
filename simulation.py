@@ -1,57 +1,72 @@
+import math
 import numpy as np
 from datetime import datetime, timezone
 from models import TelemetryFrame
+from collections import deque
+
+GRAVITY = 9.81  # m/s^2
+
+# Boost phase parameters — tune these to change flight profile
+BOOST_ACCEL = 60.0  # m/s^2 (net upward accel during burn)
+BOOST_TIME = 2.0    # s
 
 
 class FlightSimulator:
     def __init__(self):
         self._rng = np.random.default_rng()
         self.launch_time = datetime.now(timezone.utc)
-        self.flight_history: list[TelemetryFrame] = []
+        self.flight_history: deque[TelemetryFrame] = deque(maxlen=2000)
+
+        # Derive the rest of the flight profile from boost params so
+        # phases are physically consistent (velocity actually crosses
+        # zero at apogee, altitude actually returns to 0 at touchdown).
+        self.v0 = BOOST_ACCEL * BOOST_TIME
+        self.s0 = 0.5 * BOOST_ACCEL * BOOST_TIME**2
+
+        self.coast_time = self.v0 / GRAVITY  # time from burnout to apogee
+        self.apogee_altitude = self.s0 + self.v0**2 / (2 * GRAVITY)
+
+        # free-fall from apogee back to the ground
+        self.descent_time = math.sqrt(2 * self.apogee_altitude / GRAVITY)
+
+        self.loop_period = BOOST_TIME + self.coast_time + self.descent_time
 
     def generate_frame(self) -> TelemetryFrame:
         now = datetime.now(timezone.utc)
         elapsed = (now - self.launch_time).total_seconds()
 
-        # loop the simulated flight every 15 seconds
-        t = elapsed % 15.0
+        t = elapsed % self.loop_period
 
-        if t < 3.0:
+        if t < BOOST_TIME:
             # Boost: engine burning, accelerating upwards
             phase = "boost"
-            true_accel_z = 120.0  # m/s^2 upward
-            true_velocity = 120.0 * t  # v = at
-            true_altitude = 0.5 * 120.0 * t**2  # s = (1/2)at^2
+            true_accel_z = BOOST_ACCEL
+            true_velocity = BOOST_ACCEL * t
+            true_altitude = 0.5 * BOOST_ACCEL * t**2
 
-        elif t < 8.0:
-            # Coast: engine off, only gravity acting
+        elif t < BOOST_TIME + self.coast_time:
+            # Coast: engine off, only gravity acting, decelerating to apogee
             phase = "coast"
-            coast_time = t - 3.0
-            v0 = 120.0 * 3.0  # velocity at engine cutoff: 360 m/s
-            s0 = 0.5 * 120.0 * 3.0**2  # altitude at engine cutoff: 540 m
-            true_accel_z = -9.81  # m/s^2 downward (gravity
-            true_velocity = v0 - 9.81 * coast_time  # v = v0 + at
+            coast_t = t - BOOST_TIME
+            true_accel_z = -GRAVITY
+            true_velocity = self.v0 - GRAVITY * coast_t
             true_altitude = (
-                s0 + v0 * coast_time - 0.5 * 9.81 * coast_time**2
-            )  # s = s0 + v0t + (1/2)at^2
+                self.s0 + self.v0 * coast_t - 0.5 * GRAVITY * coast_t**2
+            )
 
         else:
-            # Descent: past apogee, falling back to Earth
+            # Descent: free-fall from apogee back to the ground
             phase = "descent"
-            descent_time = t - 8.0
-            v0_coast = 120.0 * 3.0
-            s0_coast = 0.5 * 120.0 * 3.0**2
-            v_at_8 = v0_coast - 9.81 * 5.0
-            s_at_8 = s0_coast + v0_coast * 5.0 - 0.5 * 9.81 * 5.0**2
-            true_accel_z = -9.81
-            true_velocity = v_at_8 - 9.81 * descent_time
+            descent_t = t - BOOST_TIME - self.coast_time
+            true_accel_z = -GRAVITY
+            true_velocity = -GRAVITY * descent_t
             true_altitude = max(
-                0, s_at_8 + v_at_8 * descent_time - 0.5 * 9.81 * descent_time**2
+                0, self.apogee_altitude - 0.5 * GRAVITY * descent_t**2
             )
 
         baro_noise = self._rng.normal(0, 2.0)
-        accel_noise = self._rng.normal(0, 0.0013 * 9.81, size=3)  # [x, y, z] noise
-        gyro_noise = self._rng.normal(0, 0.00087, size=3)  # [x, y, z] noise
+        accel_noise = self._rng.normal(0, 0.0013 * 9.81, size=3)
+        gyro_noise = self._rng.normal(0, 0.00087, size=3)
 
         frame = TelemetryFrame(
             timestamp=now.isoformat(),
