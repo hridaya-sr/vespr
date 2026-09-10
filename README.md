@@ -1,6 +1,5 @@
-# vespr
 
-# VESPR
+# VESPR: Full Stack Flight Telemetry Dashboard
 
 A full-stack rocket telemetry platform, built from scratch to explore what real flight-computer software actually looks like: ingestion, state estimation, and live visualization, end to end.
 
