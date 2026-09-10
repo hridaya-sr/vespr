@@ -24,9 +24,13 @@ interface TelemetryFrame {
   gyro_y_rads: number;
   gyro_z_rads: number;
   phase: "boost" | "coast" | "descent";
+  // EKF fusion outputs, added alongside the raw sensor fields above
+  altitude_filtered_m: number;
+  velocity_filtered_ms: number;
+  accel_bias_est: number;
 } // TypeScript interface defining the structure of a telemetry frame
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/telemetry"; 
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/telemetry";
 // WebSocket URL, defaulting to localhost if not provided in environment variables
 const MAX_POINTS = 500; // rolling window so the chart doesn't choke on long flights
 
@@ -68,11 +72,13 @@ export default function Home() {
   }, []);
 
   const latest = frames[frames.length - 1]; // Get the latest telemetry frame for display in the UI
+  const altitudeError =
+    latest ? Math.abs(latest.altitude_m - latest.altitude_filtered_m) : null;
 
   return (
-    <main className="min-h-screen bg-black text-white p-8"> 
-      <div className="flex items-center gap-3 mb-6"> 
-        <h1 className="text-2xl font-bold">VESPR Telemetry</h1> 
+    <main className="min-h-screen bg-black text-white p-8">
+      <div className="flex items-center gap-3 mb-6">
+        <h1 className="text-2xl font-bold">VESPR Telemetry</h1>
         <span
           className={`text-xs px-2 py-1 rounded ${
             connected ? "bg-green-600" : "bg-red-600"
@@ -94,64 +100,142 @@ export default function Home() {
       {latest && (
         <div className="grid grid-cols-4 gap-4 mb-6">
           <StatCard label="MET (s)" value={latest.mission_elapsed_time_s.toFixed(1)} />
-          <StatCard label="Altitude (m)" value={latest.altitude_m.toFixed(1)} />
-          <StatCard label="Velocity (m/s)" value={latest.velocity_ms.toFixed(1)} />
-          <StatCard label="Accel Z (m/s²)" value={latest.accel_z_ms2.toFixed(2)} />
+          <StatCard
+            label="Filtered Altitude (m)"
+            value={latest.altitude_filtered_m.toFixed(1)}
+            accent="text-sky-400"
+          />
+          <StatCard
+            label="Filtered Velocity (m/s)"
+            value={latest.velocity_filtered_ms.toFixed(1)}
+            accent="text-pink-400"
+          />
+          <StatCard
+            label="Accel Bias Est (m/s²)"
+            value={latest.accel_bias_est.toFixed(3)}
+            accent="text-amber-400"
+          />
         </div>
       )}
 
-      <div className="w-full h-96 bg-neutral-900 rounded-lg p-4">
-        <ResponsiveContainer width="100%" height="100%">
+      {/* Hero chart — this is the actual thesis of the project: the EKF fusing
+          a noisy barometer with accelerometer data into a cleaner altitude
+          estimate. Raw is deliberately muted/dashed so the filtered line
+          reads as the "answer" at a glance. */}
+      <div className="w-full h-[28rem] bg-neutral-900 rounded-lg p-4 mb-6 border border-neutral-800">
+        <div className="flex items-baseline justify-between mb-2 px-2">
+          <h2 className="text-sm font-semibold text-neutral-200">
+            Altitude — Raw Barometer vs. EKF Fused Estimate
+          </h2>
+          {altitudeError !== null && (
+            <span className="text-xs text-neutral-500 font-mono">
+              current spread: {altitudeError.toFixed(2)} m
+            </span>
+          )}
+        </div>
+        <ResponsiveContainer width="100%" height="90%">
           <LineChart data={frames}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
             <XAxis
               dataKey="mission_elapsed_time_s"
               stroke="#888"
               label={{ value: "MET (s)", position: "insideBottom", offset: -5 }}
             />
             <YAxis
-              yAxisId="altitude"
               stroke="#60a5fa"
               label={{ value: "Altitude (m)", angle: -90, position: "insideLeft" }}
-            />
-            <YAxis
-              yAxisId="velocity"
-              orientation="right"
-              stroke="#f472b6"
-              label={{ value: "Velocity (m/s)", angle: 90, position: "insideRight" }}
             />
             <Tooltip contentStyle={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }} />
             <Legend />
             <Line
-              yAxisId="altitude"
               type="monotone"
               dataKey="altitude_m"
-              stroke="#60a5fa"
+              stroke="#525252"
+              strokeDasharray="4 3"
+              strokeWidth={1.25}
               dot={false}
               isAnimationActive={false}
-              name="Altitude (m)"
+              name="Raw barometer"
             />
             <Line
-              yAxisId="velocity"
               type="monotone"
-              dataKey="velocity_ms"
-              stroke="#f472b6"
+              dataKey="altitude_filtered_m"
+              stroke="#60a5fa"
+              strokeWidth={2.25}
               dot={false}
               isAnimationActive={false}
-              name="Velocity (m/s)"
+              name="EKF filtered"
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
+
+      <div className="grid grid-cols-2 gap-6">
+        {/* Velocity — estimated entirely by the filter, no direct sensor exists for it */}
+        <div className="h-80 bg-neutral-900 rounded-lg p-4 border border-neutral-800">
+          <h2 className="text-sm font-semibold text-neutral-200 mb-2 px-2">
+            Velocity — EKF Estimate
+          </h2>
+          <ResponsiveContainer width="100%" height="88%">
+            <LineChart data={frames}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+              <XAxis dataKey="mission_elapsed_time_s" stroke="#888" />
+              <YAxis stroke="#f472b6" />
+              <Tooltip contentStyle={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }} />
+              <Line
+                type="monotone"
+                dataKey="velocity_filtered_ms"
+                stroke="#f472b6"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+                name="Velocity (m/s)"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Bias — shows the filter learning and correcting sensor drift over time */}
+        <div className="h-80 bg-neutral-900 rounded-lg p-4 border border-neutral-800">
+          <h2 className="text-sm font-semibold text-neutral-200 mb-2 px-2">
+            Accelerometer Bias — Estimated Drift
+          </h2>
+          <ResponsiveContainer width="100%" height="88%">
+            <LineChart data={frames}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#262626" />
+              <XAxis dataKey="mission_elapsed_time_s" stroke="#888" />
+              <YAxis stroke="#fbbf24" />
+              <Tooltip contentStyle={{ backgroundColor: "#1a1a1a", border: "1px solid #333" }} />
+              <Line
+                type="monotone"
+                dataKey="accel_bias_est"
+                stroke="#fbbf24"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+                name="Bias (m/s²)"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
     </main>
-  ); // Render the main telemetry dashboard with connection status, latest stats, and a line chart of altitude and velocity over time
+  );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+}) {
   return (
-    <div className="bg-neutral-900 rounded-lg p-4">
+    <div className="bg-neutral-900 rounded-lg p-4 border border-neutral-800">
       <div className="text-xs text-neutral-400 uppercase">{label}</div>
-      <div className="text-2xl font-mono">{value}</div>
+      <div className={`text-2xl font-mono ${accent || ""}`}>{value}</div>
     </div>
-  ); // Component to display individual telemetry statistics in a card format
+  );
 }
