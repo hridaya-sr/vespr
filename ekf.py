@@ -40,6 +40,37 @@ class BaroInertialEKF:
         self.H = np.array([[1.0, 0.0, 0.0]])
         self.R = np.array([[baro_noise_std ** 2]])
 
+        # Innovation (measurement minus prediction) from the most recent
+        # update() call — a direct measure of how much the barometer
+        # disagreed with the filter's own model just before being folded
+        # in. Exposed for anomaly flagging: a residual that's large
+        # relative to what this flight has actually been showing means
+        # either an outlier sensor reading or the physics model breaking
+        # down, either of which is worth surfacing rather than silently
+        # smoothing over.
+        self.last_innovation = 0.0
+
+        # Anomaly gate: flags an update whose innovation is large relative
+        # to a *self-adapting* running baseline of recent innovation
+        # magnitude, rather than against R (baro_noise_std**2) directly.
+        # R is a fixed, hand-tuned assumption about sensor noise; on real
+        # (especially GPS-derived) data the actual innovation spread is
+        # routinely 10-50x that assumption — not because every sample is
+        # anomalous, but because the noise/derivation-quality of whatever
+        # file got uploaded doesn't match the tuning constants. Comparing
+        # against a baseline that tracks the current file's *own* recent
+        # behavior makes the gate meaningful regardless of that mismatch.
+        # An exponential moving average of |innovation| (not variance) is
+        # used deliberately: squaring a deviation (as a running variance
+        # would) lets one huge spike dominate the baseline for a long
+        # time afterward, masking real anomalies that immediately follow
+        # it. Averaging the magnitude directly still adapts, just without
+        # that quadratic overreaction to its own outliers.
+        self._innovation_baseline = baro_noise_std
+        self._innovation_baseline_alpha = 0.02  # adapts over ~50 updates
+        self._innovation_update_count = 0
+        self.is_anomaly = False
+
     def predict(self, a_meas, dt):
         """
         Predict step. Call at IMU rate.
@@ -81,7 +112,20 @@ class BaroInertialEKF:
         self.x = self.x + (K @ y)
         I = np.eye(3)
         self.P = (I - K @ self.H) @ self.P
-    
+
+        self.last_innovation = float(y[0])
+
+        # Warm-up: don't flag anomalies before the baseline has had a
+        # chance to adapt away from its initial seed value.
+        self._innovation_update_count += 1
+        abs_innovation = abs(self.last_innovation)
+        self.is_anomaly = (
+            self._innovation_update_count > 15
+            and abs_innovation > 6 * max(self._innovation_baseline, self.baro_noise_std)
+        )
+        alpha = self._innovation_baseline_alpha
+        self._innovation_baseline = (1 - alpha) * self._innovation_baseline + alpha * abs_innovation
+
     def reset_flight(self):
         """
         Call when a new flight cycle begins (touchdown -> relaunch in the
@@ -107,6 +151,10 @@ class BaroInertialEKF:
     @property
     def bias(self):
         return self.x[2]
+
+    @property
+    def innovation(self):
+        return self.last_innovation
 
 
 def generate_synthetic_flight(duration=20.0, dt_imu=0.01, dt_baro=0.05):
