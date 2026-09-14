@@ -14,10 +14,10 @@ The core of the system is a 3-state baro-inertial Extended Kalman Filter that fu
 ## Architecture
 
 ```
-┌─────────────┐      WebSocket       ┌──────────────┐      REST/WS      ┌─────────────┐
-│  Telemetry  │ ───────────────────▶ │   FastAPI    │ ────────────────▶ │   Next.js    │
-│   Source    │                      │   Backend    │                    │   Frontend   │
-│ (CSV / sim) │                      │  (EKF core)  │                    │  (Recharts)  │
+┌─────────────┐      WebSocket       ┌──────────────┐      REST/WS       ┌────────────-┐
+│  Telemetry  │ ───────────────────▶ │   FastAPI    │ ────────────────▶  │   Next.js   │
+│   Source    │                      │   Backend    │                    │   Frontend  │
+│ (CSV / sim) │                      │  (EKF core)  │                    │  (Recharts) │
 └─────────────┘                      └──────────────┘                    └─────────────┘
                                        Render deploy                       Vercel deploy
 ```
