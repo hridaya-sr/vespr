@@ -34,7 +34,7 @@ Live simulated telemetry is the easy case — a real flight log is messier, and 
 - **Unit conversion** - altitude in meters or feet, and timestamps as elapsed seconds, elapsed milliseconds, or wall-clock time (auto-detected from the column's format) - all normalized to VESPR's internal schema before the data ever reaches the filter.
 - **Playback controls** - play/pause, variable speed (0.25x-20x), step forward/backward one frame at a time, and scrubbing to any frame in the file.
 - **Raw vs. EKF-filtered altitude overlay** - the replay chart plots the raw uploaded altitude against the EKF's fused estimate on the same axes, so the filter's job is visible rather than assumed: it's smoothing real, noisy sensor data live, not just re-plotting the input.
-- **Derived acceleration, honestly** - some real-world logs (a GPS-only tracker with no onboard accelerometer, for instance) simply have no acceleration channel. Rather than pretend a signal exists that was never measured, VESPR numerically differentiates velocity (or double-differentiates altitude, if that's all there is) to synthesize one, and tracks it internally as derived rather than measured.
+- **Derived acceleration** - some real-world logs (a GPS-only tracker with no onboard accelerometer, for instance) simply have no acceleration channel. Rather than pretend a signal exists that was never measured, VESPR numerically differentiates velocity (or double-differentiates altitude, if that's all there is) to synthesize one, and tracks it internally as derived rather than measured.
 
 Both live streaming and CSV replay run against the same deployed backend - the flow above works on [vespr-nine.vercel.app](https://vespr-nine.vercel.app/), not just locally.
 
