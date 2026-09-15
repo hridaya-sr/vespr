@@ -7,28 +7,28 @@ A full-stack rocket telemetry platform, built from scratch to explore what real 
 
 ## What it does
 
-VESPR takes rocket sensor data (barometric altitude + IMU acceleration) and turns it into a clean, real-time picture of a flight: altitude, velocity, and acceleration bias. It runs two ways: streamed live over WebSocket as a simulated flight happens, or replayed frame-by-frame from an uploaded CSV flight log through that same pipeline.
+VESPR takes rocket sensor data (barometric altitude + IMU acceleration) and turns it into a clean picture of a flight: altitude, velocity, and acceleration bias. Right now that means uploading a CSV flight log and replaying it frame-by-frame through the filter. The backend also implements a simulated live telemetry feed over WebSocket/SSE - it's the piece the project started with - but the frontend doesn't currently subscribe to it; today's UI is CSV replay only.
 
 The core of the system is a 3-state baro-inertial Extended Kalman Filter that fuses noisy barometer and accelerometer readings into a smooth state estimate; the same class of problem a real flight computer has to solve.
 
 ## Architecture
 
 ```
-┌─────────────┐      WebSocket       ┌──────────────┐      REST/WS       ┌────────────-┐
-│  Telemetry  │ ───────────────────▶ │   FastAPI    │ ────────────────▶  │   Next.js   │
-│   Source    │                      │   Backend    │                    │   Frontend  │
-│ (CSV / sim) │                      │  (EKF core)  │                    │  (Recharts) │
-└─────────────┘                      └──────────────┘                    └─────────────┘
-                                       Render deploy                       Vercel deploy
+┌──────────────┐         REST          ┌──────────────┐
+│   Next.js    │ ────────────────────▶ │   FastAPI    │
+│   Frontend   │ ◀──────────────────── │   Backend    │
+│  (Recharts)  │   upload/mapping/     │  (EKF core)  │
+└──────────────┘   step/seek/reset     └──────────────┘
+  Vercel deploy                          Render deploy
 ```
 
-- **Backend** - FastAPI, deployed on Render. Runs the EKF, manages flight state, and streams updates over WebSocket.
-- **Frontend** - Next.js/React, deployed on Vercel. Subscribes to the telemetry stream and renders live charts with Recharts.
-- **State estimation** - 3-state EKF (altitude, velocity, accelerometer bias), validated against the EuRoC 2023 dataset.
+- **Backend** - FastAPI, deployed on Render. Runs the EKF, holds CSV session state in memory, and also exposes a simulated live telemetry feed over WebSocket (`/ws/telemetry`) and SSE (`/telemetry/stream`) - implemented and reachable, but not currently called by the frontend.
+- **Frontend** - Next.js/React, deployed on Vercel. Drives the whole CSV upload → mapping → normalize → replay flow over plain REST, and renders the raw-vs-EKF charts with Recharts. No live-telemetry view exists in the UI yet.
+- **State estimation** - 3-state EKF (altitude, velocity, accelerometer bias), validated against the EuRoC 2023 dataset, shared by both the live-telemetry and CSV-replay code paths on the backend.
 
 ## CSV Flight Log Replay
 
-Live simulated telemetry is the easy case — a real flight log is messier, and there's no fixed schema, since every flight computer, altimeter, or GPS logger exports differently. So VESPR also accepts an uploaded CSV and replays it through the same EKF as the live demo, one frame at a time.
+A real flight log is messy, and there's no fixed schema, since every flight computer, altimeter, or GPS logger exports differently. VESPR accepts an uploaded CSV and replays it through the EKF one frame at a time - this is currently the app's only way to see data flow through the filter, live simulated telemetry being backend-only for now (see Architecture above).
 
 - **Guided column mapping** - after upload, a mapping screen shows the file's columns and lets you point VESPR at whichever ones are timestamp, altitude, and (optionally) velocity/acceleration, instead of assuming a specific device's export format.
 - **Unit conversion** - altitude in meters or feet, and timestamps as elapsed seconds, elapsed milliseconds, or wall-clock time (auto-detected from the column's format) - all normalized to VESPR's internal schema before the data ever reaches the filter.
@@ -36,7 +36,7 @@ Live simulated telemetry is the easy case — a real flight log is messier, and 
 - **Raw vs. EKF-filtered altitude overlay** - the replay chart plots the raw uploaded altitude against the EKF's fused estimate on the same axes, so the filter's job is visible rather than assumed: it's smoothing real, noisy sensor data live, not just re-plotting the input.
 - **Derived acceleration** - some real-world logs (a GPS-only tracker with no onboard accelerometer, for instance) simply have no acceleration channel. Rather than pretend a signal exists that was never measured, VESPR numerically differentiates velocity (or double-differentiates altitude, if that's all there is) to synthesize one, and tracks it internally as derived rather than measured.
 
-Both live streaming and CSV replay run against the same deployed backend - the flow above works on [vespr-nine.vercel.app](https://vespr-nine.vercel.app/), not just locally.
+Confirmed working against the deployed backend, not just locally - the flow above runs end to end on [vespr-nine.vercel.app](https://vespr-nine.vercel.app/).
 
 ## State estimation
 
@@ -63,7 +63,7 @@ npm install
 npm run dev
 ```
 
-Set the frontend's WebSocket/API base URL to point at your backend instance (local or deployed) via environment variables.
+Set the frontend's API base URL (`NEXT_PUBLIC_API_URL`) to point at your backend instance, local or deployed.
 
 
 ## Why this exists
